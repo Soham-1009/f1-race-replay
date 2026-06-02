@@ -1,7 +1,9 @@
+import sys
 import arcade
 import threading
 import time
 import numpy as np
+from src.lib.arcade_compat import ensure_arcade_compat
 from src.ui_components import (
     build_track_from_example_lap,
     LapTimeLeaderboardComponent,
@@ -14,10 +16,19 @@ from src.ui_components import (
 )
 from src.f1_data import get_driver_quali_telemetry
 from src.f1_data import FPS
-from src.lib.time import format_time
 
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
+# Enable DPI awareness on Windows for crisp rendering on high-DPI displays
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+
+ensure_arcade_compat(arcade)
+
+SCREEN_WIDTH = 1920
+SCREEN_HEIGHT = 1080
 SCREEN_TITLE = "F1 Qualifying Telemetry"
 
 H_ROW = 38
@@ -29,7 +40,7 @@ BOTTOM_MARGIN = 40
 
 class QualifyingReplay(arcade.Window):
     def __init__(self, session, data, circuit_rotation=0, left_ui_margin=340, right_ui_margin=0, title="Qualifying Results"):
-        super().__init__(width=SCREEN_WIDTH, height=SCREEN_HEIGHT, title=title, resizable=True)
+        super().__init__(width=SCREEN_WIDTH, height=SCREEN_HEIGHT, title=title, resizable=True, antialiasing=True, samples=4)
         self.maximize()
         
         self.session = session
@@ -226,14 +237,30 @@ class QualifyingReplay(arcade.Window):
                 fastest_driver = self.data.get("results", [])[0] if isinstance(self.data.get("results", []), list) and len(self.data.get("results", [])) > 0 else None
                 # Get comparison telemetry if available
                 comparison_data = self.data.get("telemetry", {}).get(fastest_driver.get("code")) if fastest_driver and self.show_comparison_telemetry else None
-                comparison_telemetry = comparison_data.get("Q3").get("frames", []) if comparison_data and self.show_comparison_telemetry and fastest_driver and ((fastest_driver.get("code") != self.loaded_driver_code) or (fastest_driver.get("code") == self.loaded_driver_code and self.loaded_driver_segment != "Q3")) else None
+                show_comparison = (
+                    bool(comparison_data)
+                    and self.show_comparison_telemetry
+                    and fastest_driver
+                    and (
+                        fastest_driver.get("code") != self.loaded_driver_code
+                        or (
+                            fastest_driver.get("code") == self.loaded_driver_code
+                            and self.loaded_driver_segment != "Q3"
+                        )
+                    )
+                )
+                comparison_q3 = comparison_data.get("Q3") if isinstance(comparison_data, dict) else None
+                comparison_telemetry = (
+                    comparison_q3.get("frames", [])
+                    if show_comparison and isinstance(comparison_q3, dict)
+                    else None
+                )
 
                 # right-hand area (to the right of leaderboard)
                 area_left = self.leaderboard.x + getattr(self.leaderboard, "width", 240) + 40
                 area_right = self.width - RIGHT_MARGIN
                 area_top = self.height - TOP_MARGIN
                 area_bottom = BOTTOM_MARGIN
-                area_w = max(10, area_right - area_left)
                 area_h = max(10, area_top - area_bottom)
 
                 # Split vertically: top half = chart, bottom half = circuit map
@@ -368,13 +395,12 @@ class QualifyingReplay(arcade.Window):
 
                 current_frame = frames[self.frame_index]
                 current_tel = current_frame.get("telemetry", {}) if isinstance(current_frame.get("telemetry", {}), dict) else {}
-                current_comparison_tel = comparison_telemetry[self.frame_index].get("telemetry") if comparison_telemetry and self.frame_index < len(comparison_telemetry) else {}
                 current_dist = self._pick_telemetry_value(current_tel, "dist")
                 
                 for dz in self.drs_zones:
                     zone_start = dz.get("zone_start")
                     zone_end = dz.get("zone_end")
-                    if zone_start is None or zone_end is None:
+                    if current_dist is None or zone_start is None or zone_end is None:
                         continue
                     if current_dist >= zone_start:
                         # driver has passed at least the start of this zone
@@ -561,15 +587,15 @@ class QualifyingReplay(arcade.Window):
                 self.qualifying_lap_time_comp.x = map_left
                 self.qualifying_lap_time_comp.y = map_top
                 self.qualifying_lap_time_comp.fastest_driver = fastest_driver
-                self.qualifying_lap_time_comp.fastest_driver_sector_times = comparison_data.get("Q3").get("sector_times", {}) if comparison_data and self.show_comparison_telemetry and fastest_driver and ((fastest_driver.get("code") != self.loaded_driver_code) or (fastest_driver.get("code") == self.loaded_driver_code and self.loaded_driver_segment != "Q3")) else None
+                self.qualifying_lap_time_comp.fastest_driver_sector_times = (
+                    comparison_q3.get("sector_times", {})
+                    if show_comparison and isinstance(comparison_q3, dict)
+                    else None
+                )
                 self.qualifying_lap_time_comp.draw(self)
 
                 y_offset = map_top - 48
                 arcade.Text(f"Playback Speed: {self.playback_speed:.1f}x", map_left + 10, y_offset - 130, arcade.color.ANTI_FLASH_WHITE, 14).draw()
-
-                # Legends
-                legend_x = chart_right - 100
-                legend_y = ctrl_top - int(ctrl_h * 0.2)
 
                 # Draw circuit map in bottom half (fit inner/outer polylines into map area)
                 if getattr(self, "x_min", None) is not None and getattr(self, "x_max", None) is not None:
@@ -1032,7 +1058,7 @@ class QualifyingReplay(arcade.Window):
             self.paused = self.was_paused_before_hold
 
 def run_qualifying_replay(session, data, title="Qualifying Results", ready_file=None):
-    window = QualifyingReplay(session=session, data=data, title=title)
+    _window = QualifyingReplay(session=session, data=data, title=title)
     # Signal readiness to parent process (if requested) after window created
     if ready_file:
         try:

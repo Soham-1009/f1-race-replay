@@ -4,6 +4,7 @@ import pickle
 import sys
 from datetime import timedelta, date
 from multiprocessing import Pool, cpu_count
+from multiprocessing.dummy import Pool as ThreadPool
 
 import fastf1
 import fastf1.plotting
@@ -27,8 +28,55 @@ def enable_cache():
     fastf1.Cache.enable_cache(cache_path)
 
 
+def _computed_data_file(event_name, cache_suffix):
+    settings = get_settings()
+    return os.path.join(
+        settings.computed_data_location,
+        f"{event_name}_{cache_suffix}_telemetry.pkl",
+    )
+
+
+def _ensure_parent_dir(file_path):
+    parent = os.path.dirname(file_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
 FPS = 25
 DT = 1 / FPS
+
+
+def _worker_count(item_count):
+    if item_count <= 0:
+        return 0
+
+    configured = os.environ.get("F1_REPLAY_WORKERS")
+    if configured:
+        try:
+            return max(1, min(int(configured), item_count))
+        except ValueError:
+            print(f"Warning: Ignoring invalid F1_REPLAY_WORKERS={configured!r}")
+
+    if os.name == "nt":
+        return min(4, item_count)
+
+    return min(cpu_count(), item_count)
+
+
+def _map_driver_work(worker, args, label):
+    worker_count = _worker_count(len(args))
+    if worker_count <= 1:
+        print(f"Processing {len(args)} {label} sequentially...")
+        return [worker(arg) for arg in args]
+
+    if os.name == "nt":
+        print(f"Processing {len(args)} {label} with {worker_count} threads...")
+        with ThreadPool(processes=worker_count) as pool:
+            return pool.map(worker, args)
+
+    print(f"Processing {len(args)} {label} with {worker_count} processes...")
+    with Pool(processes=worker_count) as pool:
+        return pool.map(worker, args)
 
 
 def _process_single_driver(args):
@@ -97,6 +145,10 @@ def _process_single_driver(args):
         drs_all.append(drs_lap)
         throttle_all.append(throttle_lap)
         brake_all.append(brake_lap)
+
+        finite_distances = d_lap[np.isfinite(d_lap)]
+        if finite_distances.size:
+            total_dist_so_far += float(finite_distances.max())
 
     if not t_all:
         return None
@@ -206,7 +258,6 @@ def _compute_safety_car_positions(frames, track_statuses, session):
         
         ref_xs = tel["X"].to_numpy().astype(float)
         ref_ys = tel["Y"].to_numpy().astype(float)
-        ref_dist = tel["Distance"].to_numpy().astype(float)
         
         if len(ref_xs) < 10:
             print("Safety Car: Insufficient reference points, skipping")
@@ -218,7 +269,6 @@ def _compute_safety_car_positions(frames, track_statuses, session):
         t_new = np.linspace(0, 1, 4000)
         ref_xs_dense = np.interp(t_new, t_old, ref_xs)
         ref_ys_dense = np.interp(t_new, t_old, ref_ys)
-        ref_dist_dense = np.interp(t_new, t_old, ref_dist)
         
         # Build KD-Tree for fast position lookups
         ref_tree = cKDTree(np.column_stack((ref_xs_dense, ref_ys_dense)))
@@ -365,7 +415,7 @@ def _compute_safety_car_positions(frames, track_statuses, session):
     # For each SC period, track the SC's cumulative position on the track
     sc_state = {}  # keyed by sc_period index
     
-    for fi, frame in enumerate(frames):
+    for frame in frames:
         t = frame["t"]
         
         # Check if current time falls in any SC period
@@ -539,14 +589,13 @@ def _compute_safety_car_positions(frames, track_statuses, session):
 def get_race_telemetry(session, session_type="R"):
     event_name = str(session).replace(" ", "_")
     cache_suffix = "sprint" if session_type == "S" else "race"
+    cache_file = _computed_data_file(event_name, cache_suffix)
 
     # Check if this data has already been computed
 
     try:
         if "--refresh-data" not in sys.argv:
-            with open(
-                f"computed_data/{event_name}_{cache_suffix}_telemetry.pkl", "rb"
-            ) as f:
+            with open(cache_file, "rb") as f:
                 frames = pickle.load(f)
                 print(f"Loaded precomputed {cache_suffix} telemetry data.")
                 print("The replay should begin in a new window shortly!")
@@ -565,17 +614,13 @@ def get_race_telemetry(session, session_type="R"):
 
     max_lap_number = 0
 
-    # 1. Get all of the drivers telemetry data using multiprocessing
+    # 1. Get all of the drivers telemetry data
     # Prepare arguments for parallel processing
-    print(f"Processing {len(drivers)} drivers in parallel...")
     driver_args = [
         (driver_no, session, driver_codes[driver_no]) for driver_no in drivers
     ]
 
-    num_processes = min(cpu_count(), len(drivers))
-
-    with Pool(processes=num_processes) as pool:
-        results = pool.map(_process_single_driver, driver_args)
+    results = _map_driver_work(_process_single_driver, driver_args, "race drivers")
 
     # Process results
     for result in results:
@@ -914,12 +959,10 @@ def get_race_telemetry(session, session_type="R"):
     _compute_safety_car_positions(frames, formatted_track_statuses, session)
     print("completed telemetry extraction...")
     print("Saving to cache file...")
-    # If computed_data/ directory doesn't exist, create it
-    if not os.path.exists("computed_data"):
-        os.makedirs("computed_data")
+    _ensure_parent_dir(cache_file)
 
     # Save using pickle (10-100x faster than JSON)
-    with open(f"computed_data/{event_name}_{cache_suffix}_telemetry.pkl", "wb") as f:
+    with open(cache_file, "wb") as f:
         pickle.dump({
             "frames": frames,
             "driver_colors": get_driver_colors(session),
@@ -1332,13 +1375,12 @@ def get_quali_telemetry(session, session_type="Q"):
 
     event_name = str(session).replace(" ", "_")
     cache_suffix = "sprintquali" if session_type == "SQ" else "quali"
+    cache_file = _computed_data_file(event_name, cache_suffix)
 
     # Check if this data has already been computed
     try:
         if "--refresh-data" not in sys.argv:
-            with open(
-                f"computed_data/{event_name}_{cache_suffix}_telemetry.pkl", "rb"
-            ) as f:
+            with open(cache_file, "rb") as f:
                 data = pickle.load(f)
                 print(f"Loaded precomputed {cache_suffix} telemetry data.")
                 print("The replay should begin in a new window shortly!")
@@ -1361,12 +1403,7 @@ def get_quali_telemetry(session, session_type="Q"):
 
     driver_args = [(session, driver_codes[driver_no]) for driver_no in session.drivers]
 
-    print(f"Processing {len(session.drivers)} drivers in parallel...")
-
-    num_processes = min(cpu_count(), len(session.drivers))
-
-    with Pool(processes=num_processes) as pool:
-        results = pool.map(_process_quali_driver, driver_args)
+    results = _map_driver_work(_process_quali_driver, driver_args, "qualifying drivers")
     for result in results:
         driver_code = result["driver_code"]
         telemetry_data[driver_code] = {
@@ -1381,10 +1418,9 @@ def get_quali_telemetry(session, session_type="Q"):
 
     # Save to the compute_data directory
 
-    if not os.path.exists("computed_data"):
-        os.makedirs("computed_data")
+    _ensure_parent_dir(cache_file)
 
-    with open(f"computed_data/{event_name}_{cache_suffix}_telemetry.pkl", "wb") as f:
+    with open(cache_file, "wb") as f:
         pickle.dump(
             {
                 "results": qualifying_results,
@@ -1439,7 +1475,7 @@ def get_race_weekends_by_place(place):
     weekends=[]
     current_year=date.today().year
 
-    for year in range(2018,current_year): #Edit according to data availability (current data till last year)
+    for year in range(2018, current_year + 1):
         try:
             schedule=fastf1.get_event_schedule(year)
         except Exception:
@@ -1462,9 +1498,11 @@ def get_race_weekends_by_place(place):
                 })
     return weekends
 
-def get_all_unique_race_names(start_year=2018, end_year=2025): #update as necessary
+def get_all_unique_race_names(start_year=2018, end_year=None):
     "Return a list of all unique race locations"
     enable_cache()
+    if end_year is None:
+        end_year = date.today().year
     race_names=set()
     
     for year in range(start_year, end_year+1):

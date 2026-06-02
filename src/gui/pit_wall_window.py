@@ -1,5 +1,4 @@
 from PySide6.QtWidgets import QMainWindow, QStatusBar, QLabel
-from PySide6.QtCore import Qt
 from src.services.stream import TelemetryStreamClient
 
 

@@ -1,9 +1,11 @@
 import os
+import sys
 import time
 import arcade
 import numpy as np
 from scipy.spatial import cKDTree
 from src.f1_data import FPS
+from src.lib.arcade_compat import ensure_arcade_compat
 from src.ui_components import (
     LeaderboardComponent, 
     WeatherComponent, 
@@ -20,9 +22,18 @@ from src.ui_components import (
 from src.tyre_degradation_integration import TyreDegradationIntegrator
 from src.services.stream import TelemetryStreamServer
 
+# Enable DPI awareness on Windows for crisp rendering on high-DPI displays
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
 
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
+ensure_arcade_compat(arcade)
+
+SCREEN_WIDTH = 1920
+SCREEN_HEIGHT = 1080
 SCREEN_TITLE = "F1 Race Replay"
 PLAYBACK_SPEEDS = [0.1, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0]
 
@@ -33,7 +44,7 @@ class F1RaceReplayWindow(arcade.Window):
                  session_info=None, session=None, enable_telemetry=False,
                  race_control_messages=None):
         # Set resizable to True so the user can adjust mid-sim
-        super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, title, resizable=True)
+        super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, title, resizable=True, antialiasing=True, samples=4)
         self.maximize()
 
         self.telemetry_stream = None
@@ -216,6 +227,7 @@ class F1RaceReplayWindow(arcade.Window):
 
         # Selection & hit-testing state for leaderboard
         self.selected_driver = None
+        self.selected_drivers = []
         self.leaderboard_rects = []  # list of tuples: (code, left, bottom, right, top)
         # store previous leaderboard order for up/down arrows
         self.last_leaderboard_order = None
@@ -498,9 +510,9 @@ class F1RaceReplayWindow(arcade.Window):
             track_color = STATUS_COLORS.get("VSC")
             
         if len(self.screen_inner_points) > 1:
-            arcade.draw_line_strip(self.screen_inner_points, track_color, 4)
+            arcade.draw_line_strip(self.screen_inner_points, track_color, 5)
         if len(self.screen_outer_points) > 1:
-            arcade.draw_line_strip(self.screen_outer_points, track_color, 4)
+            arcade.draw_line_strip(self.screen_outer_points, track_color, 5)
         
         # 2.5 Draw DRS Zones (green segments on outer track edge)
         if hasattr(self, 'drs_zones') and self.drs_zones and self.toggle_drs_zones:
@@ -565,7 +577,7 @@ class F1RaceReplayWindow(arcade.Window):
                 text_padding = 3 if snx >= 0 else -3
                 arcade.draw_text(code, lx + text_padding, ly, color, 10, anchor_x=anchor_x, anchor_y="center", bold=True)
 
-            arcade.draw_circle_filled(sx, sy, 6, color)
+            arcade.draw_circle_filled(sx, sy, 8, color)
         
         # 3b. Draw Safety Car (if active)
         sc_data = frame.get("safety_car")
@@ -710,7 +722,12 @@ class F1RaceReplayWindow(arcade.Window):
         driver_list = []
         for code, pos in frame["drivers"].items():
             color = self.driver_colors.get(code, arcade.color.WHITE)
-            progress_m = driver_progress.get(code, float(pos.get("dist", 0.0)))
+            raw_dist = pos.get("dist", 0.0)
+            try:
+                fallback_progress = float(raw_dist if raw_dist is not None else 0.0)
+            except (TypeError, ValueError):
+                fallback_progress = 0.0
+            progress_m = driver_progress.get(code, fallback_progress)
             driver_list.append((code, color, pos, progress_m))
         driver_list.sort(key=lambda x: x[3], reverse=True)
 
@@ -869,6 +886,7 @@ class F1RaceReplayWindow(arcade.Window):
             return
         # default: clear selection if clicked elsewhere
         self.selected_driver = None
+        self.selected_drivers = []
         
     def on_mouse_motion(self, x: float, y: float, dx: float, dy: float):
         """Handle mouse motion for hover effects on progress bar and controls."""

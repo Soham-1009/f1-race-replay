@@ -74,10 +74,11 @@ Recently added support for Qualifying session replays with telemetry visualizati
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11-3.13
 - [FastF1](https://github.com/theOehrly/Fast-F1)
 - [Arcade](https://api.arcade.academy/en/latest/)
 - numpy
+- scipy
 
 Install dependencies:
 ```bash
@@ -118,6 +119,19 @@ To get started with this project locally, you can follow these steps:
 If the pull data proccess fails, run:
 ```bash
 pip install --upgrade fastf1
+```
+
+If Arcade or Pyglet crashes on startup, check your Python version:
+```bash
+python --version
+```
+Use Python 3.11, 3.12, or 3.13 for this project.
+
+On Windows, telemetry extraction avoids process-based multiprocessing because
+loaded FastF1 sessions can be too large to pickle. To reduce worker memory
+further in PowerShell, run:
+```powershell
+$env:F1_REPLAY_WORKERS="1"
 ```
 
 ## Usage

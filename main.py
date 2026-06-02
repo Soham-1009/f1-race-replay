@@ -1,14 +1,22 @@
-from src.f1_data import get_race_telemetry, enable_cache, get_circuit_rotation, load_session, get_quali_telemetry, list_rounds, list_sprints
-from src.run_session import run_arcade_replay, launch_insights_menu
-from src.interfaces.qualifying import run_qualifying_replay
 import sys
-from src.cli.race_selection import cli_load
-from src.gui.race_selection import RaceSelectionWindow
-from PySide6.QtWidgets import QApplication
-from src.lib.season import get_season
 import logging
+import os
+
+# Enable DPI awareness on Windows for crisp rendering on high-DPI displays
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+
+from src.f1_data import get_race_telemetry, enable_cache, get_circuit_rotation, load_session, get_quali_telemetry, list_rounds, list_sprints
+from src.lib.season import get_season
 
 def main(year=None, round_number=None, playback_speed=1, session_type='R', visible_hud=True, ready_file=None, show_telemetry_viewer=True):
+  from src.interfaces.qualifying import run_qualifying_replay
+  from src.run_session import run_arcade_replay, launch_insights_menu
+
   print(f"Loading F1 {year} Round {round_number} Session '{session_type}'")
   session = load_session(year, round_number, session_type)
 
@@ -116,6 +124,8 @@ if __name__ == "__main__":
 
   if "--cli" in sys.argv:
     # Run the CLI
+    from src.cli.race_selection import cli_load
+
     cli_load()
     sys.exit(0)
 
@@ -133,8 +143,10 @@ if __name__ == "__main__":
 
   if "--list-rounds" in sys.argv:
     list_rounds(year)
+    sys.exit(0)
   elif "--list-sprints" in sys.argv:
     list_sprints(year)
+    sys.exit(0)
   else:
     playback_speed = 1
 
@@ -158,6 +170,12 @@ if __name__ == "__main__":
     sys.exit(0)
 
   # Run the GUI
+
+  from PySide6.QtWidgets import QApplication
+  from src.gui.race_selection import RaceSelectionWindow
+
+  # Enable high-DPI scaling for sharp text/icons on modern displays
+  os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
   app = QApplication(sys.argv)
   win = RaceSelectionWindow()

@@ -1,7 +1,7 @@
 import arcade
-from typing import List, Literal, Tuple, Optional
-from typing import Sequence, Optional, Tuple
+from typing import List, Tuple, Optional
 from src.lib.time import format_time
+from src.lib.arcade_compat import ensure_arcade_compat
 import numpy as np
 import pandas as pd
 import os
@@ -9,6 +9,8 @@ from src.tyre_degradation_integration import (
     format_tyre_health_bar, 
     format_degradation_text
 )
+
+ensure_arcade_compat(arcade)
 
 def _format_wind_direction(degrees: Optional[float]) -> str:
   if degrees is None:
@@ -193,7 +195,16 @@ class WeatherComponent(BaseComponent):
         panel_top = window.height - self.top_offset
         if not self.info and not getattr(window, "has_weather", False):
             return
-        arcade.Text("Weather", self.left + 12, panel_top - 10, arcade.color.WHITE, 18, bold=True, anchor_y="top").draw()
+        # Draw glass-effect background panel behind weather
+        weather_panel_rect = arcade.XYWH(
+            self.left + self.width / 2,
+            panel_top - self.height / 2,
+            self.width + 10,
+            self.height + 10
+        )
+        arcade.draw_rect_filled(weather_panel_rect, (10, 10, 20, 170))
+        arcade.draw_rect_outline(weather_panel_rect, (40, 40, 60, 100), 1)
+        arcade.Text("WEATHER", self.left + 12, panel_top - 10, (220, 220, 230), 14, bold=True, anchor_y="top").draw()
         def _fmt(val, suffix="", precision=1):
             return f"{val:.{precision}f}{suffix}" if val is not None else "N/A"
         info = self.info or {}
@@ -209,10 +220,6 @@ class WeatherComponent(BaseComponent):
         start_y = panel_top - 36
         last_y = start_y
 
-        self._text.font_size = 18; self._text.bold = True; self._text.color = arcade.color.WHITE
-        self._text.text = "Weather"
-        self._text.x = self.left + 12; self._text.y = panel_top - 10
-        self._text.draw()
 
         for idx, (label, value, icon_key) in enumerate(weather_lines):
             line_y = start_y - idx * 22
@@ -235,9 +242,12 @@ class WeatherComponent(BaseComponent):
 
             line_text = f"{label}: {value}"
             
-            self._text.font_size = 14; self._text.bold = False; self._text.color = arcade.color.LIGHT_GRAY
+            self._text.font_size = 14
+            self._text.bold = False
+            self._text.color = arcade.color.LIGHT_GRAY
             self._text.text = line_text
-            self._text.x = self.left + 38; self._text.y = line_y
+            self._text.x = self.left + 38
+            self._text.y = line_y
             self._text.draw()
 
         # Track the bottom of the weather panel so info boxes can stack below it
@@ -250,7 +260,7 @@ class LeaderboardComponent(BaseComponent):
         self.entries = []  # list of tuples (code, color, pos, progress_m)
         self.rects = []    # clickable rects per entry
         self.selected = []  # Changed to list for multiple selection
-        self.row_height = 25
+        self.row_height = 28
         self.show_gaps = False
         self.show_neighbor_gaps = False
         self.gap_toggle_rect = None
@@ -304,7 +314,7 @@ class LeaderboardComponent(BaseComponent):
 
         leader_progress_val = self.entries[0][3]
 
-        for idx, (code, _, pos, progress_m) in enumerate(self.entries):
+        for idx, (code, _, _pos, progress_m) in enumerate(self.entries):
             # Leader gap
             try:
                 raw_to_leader = abs(leader_progress_val - (progress_m or 0.0))
@@ -334,7 +344,19 @@ class LeaderboardComponent(BaseComponent):
             return
         self.selected = getattr(window, "selected_drivers", [])
         leaderboard_y = window.height - 40
-        arcade.Text("Leaderboard", self.x, leaderboard_y, arcade.color.WHITE, 20, bold=True, anchor_x="left", anchor_y="top").draw()
+
+        # Draw semi-transparent background panel behind the leaderboard
+        num_entries = len(self.entries) if self.entries else 1
+        panel_height = 40 + num_entries * self.row_height + 10
+        panel_rect = arcade.XYWH(
+            self.x + self.width / 2,
+            leaderboard_y - panel_height / 2 + 10,
+            self.width + 20,
+            panel_height + 10
+        )
+        arcade.draw_rect_filled(panel_rect, (10, 10, 20, 180))
+
+        arcade.Text("LEADERBOARD", self.x, leaderboard_y, (220, 220, 230), 14, bold=True, anchor_x="left", anchor_y="top").draw()
         # sync with window state if present
         self.show_gaps = getattr(window, "leaderboard_show_gaps", self.show_gaps)
         self.show_neighbor_gaps = getattr(window, "leaderboard_show_neighbor_gaps", self.show_neighbor_gaps)
@@ -376,13 +398,13 @@ class LeaderboardComponent(BaseComponent):
                 self.entries,
                 key=lambda e: (
                     -e[2].get("lap", 0),  # Descending lap number
-                    -e[2].get("dist")                 # Descending distance progressed
+                    -(e[2].get("dist", 0) or 0)       # Descending distance progressed
                 )
             )
         else:
             new_entries = self.entries
 
-        for i, (code, color, pos, progress_m) in enumerate(new_entries):
+        for i, (code, color, pos, _progress_m) in enumerate(new_entries):
             current_pos = i + 1
             top_y = leaderboard_y - 30 - ((current_pos - 1) * self.row_height)
             bottom_y = top_y - self.row_height
@@ -392,9 +414,14 @@ class LeaderboardComponent(BaseComponent):
 
             if code in self.selected:
                 rect = arcade.XYWH((left_x + right_x)/2, (top_y + bottom_y)/2, right_x - left_x, top_y - bottom_y)
-                arcade.draw_rect_filled(rect, arcade.color.LIGHT_GRAY)
-                text_color = arcade.color.BLACK
+                arcade.draw_rect_filled(rect, (30, 30, 45, 220))
+                # Draw a team-color accent bar on the left edge
+                accent_rect = arcade.XYWH(left_x + 2, (top_y + bottom_y)/2, 4, top_y - bottom_y)
+                arcade.draw_rect_filled(accent_rect, color)
+                text_color = (255, 255, 255)
             else:
+                # Subtle separator line
+                arcade.draw_line(left_x, bottom_y, right_x, bottom_y, (30, 30, 45, 100), 1)
                 text_color = color
 
             text = f"{current_pos}. {code}" 
@@ -410,13 +437,15 @@ class LeaderboardComponent(BaseComponent):
                 driver_text = text
                 pit_text = ""
 
-            arcade.Text(driver_text,left_x,top_y,text_color,16,anchor_x="left",anchor_y="top").draw()
+            arcade.Text(driver_text,left_x + 6,top_y,text_color,17,anchor_x="left",anchor_y="top",bold=code in self.selected).draw()
             
             #PIT indicator in white
-            if pit_text:arcade.Text(pit_text, left_x + 80, top_y,arcade.color.WHITE,16,anchor_x="left",anchor_y="top").draw()
+            if pit_text:
+                arcade.Text(pit_text, left_x + 90, top_y, arcade.color.WHITE, 16, anchor_x="left", anchor_y="top").draw()
 
             #OUT indicator in red
-            if out_text: arcade.Text(out_text, left_x + 80, top_y, (155,17,30), 16, anchor_x="left", anchor_y="top",bold=True).draw()
+            if out_text:
+                arcade.Text(out_text, left_x + 90, top_y, (220, 40, 40), 16, anchor_x="left", anchor_y="top", bold=True).draw()
 
             # Gap display (if enabled)
             if getattr(self, "show_neighbor_gaps", False):
@@ -461,7 +490,7 @@ class LeaderboardComponent(BaseComponent):
             if getattr(self, "show_neighbor_gaps", False) or getattr(self, "show_gaps", False):
                 gap_x = right_x - 36
                 if 'gap_text' in locals() and gap_text:
-                    gap_color = arcade.color.BLACK if code in self.selected else arcade.color.LIGHT_GRAY
+                    gap_color = arcade.color.WHITE if code in self.selected else arcade.color.LIGHT_GRAY
                     # Update and draw the reusable gap Text object
                     self._gap_text.text = gap_text
                     self._gap_text.x = gap_x
@@ -699,7 +728,6 @@ class QualifyingSegmentSelectorComponent(BaseComponent):
         left = center_x - self.width // 2
         right = center_x + self.width // 2
         top = center_y + self.height // 2
-        bottom = center_y - self.height // 2
         
         # Draw modal background
         modal_rect = arcade.XYWH(center_x, center_y, self.width, self.height)
@@ -736,8 +764,6 @@ class QualifyingSegmentSelectorComponent(BaseComponent):
         for i, data in enumerate(segments):
             segment = f"Q{data['segment']}"
             segment_top = start_y - (i * (segment_height + 10))
-            segment_bottom = segment_top - segment_height
-            
             # Highlight if selected
             segment_rect = arcade.XYWH(center_x, segment_top - segment_height//2, 
                                      self.width - 40, segment_height)
@@ -776,8 +802,6 @@ class QualifyingSegmentSelectorComponent(BaseComponent):
         left = center_x - self.width // 2
         right = center_x + self.width // 2
         top = center_y + self.height // 2
-        bottom = center_y - self.height // 2
-        
         # Check close button (match the rect from draw method)
         close_btn_left = right - 30 - 10  # center - half width
         close_btn_right = right - 30 + 10  # center + half width
@@ -847,13 +871,15 @@ class DriverInfoComponent(BaseComponent):
         idx = min(int(window.frame_index), window.n_frames - 1)
         frame = window.frames[idx]
 
-        box_width, box_height, gap = self.width, 210, 10
+        box_width, box_height, gap = self.width, 220, 10
         weather_bottom = getattr(window, "weather_bottom", None)
         current_top = weather_bottom - 20 if weather_bottom else window.height - 200
 
         for code in codes:
-            if code not in frame["drivers"]: continue
-            if current_top - box_height < self.min_top: break
+            if code not in frame["drivers"]:
+                continue
+            if current_top - box_height < self.min_top:
+                break
 
             driver_pos = frame["drivers"][code]
             center_y = current_top - (box_height / 2)
@@ -866,15 +892,19 @@ class DriverInfoComponent(BaseComponent):
         left, right = center_x - box_width / 2, center_x + box_width / 2
 
         rect = arcade.XYWH(center_x, center_y, box_width, box_height)
-        arcade.draw_rect_filled(rect, (0, 0, 0, 200))
+        arcade.draw_rect_filled(rect, (8, 8, 18, 210))
 
         team_color = window.driver_colors.get(code, arcade.color.GRAY)
-        arcade.draw_rect_outline(rect, team_color, 2)
+        arcade.draw_rect_outline(rect, (team_color[0], team_color[1], team_color[2], 120), 1)
 
-        header_height = 30
+        header_height = 32
         header_cy = top - (header_height / 2)
-        arcade.draw_rect_filled(arcade.XYWH(center_x, header_cy, box_width, header_height), team_color)
-        arcade.Text(f"Driver: {code}", left + 10, header_cy, arcade.color.BLACK, 14, anchor_y="center",
+        # Darker team-color header with an accent stripe on top
+        header_color = (max(0, team_color[0] - 30), max(0, team_color[1] - 30), max(0, team_color[2] - 30))
+        arcade.draw_rect_filled(arcade.XYWH(center_x, header_cy, box_width, header_height), header_color)
+        accent_stripe = arcade.XYWH(center_x, top - 1, box_width, 3)
+        arcade.draw_rect_filled(accent_stripe, team_color)
+        arcade.Text(f"{code}", left + 12, header_cy, arcade.color.WHITE, 15, anchor_y="center",
                     bold=True).draw()
 
         cursor_y, row_gap = top - header_height - 25, 25
@@ -984,13 +1014,19 @@ class DriverInfoComponent(BaseComponent):
         # Throttle
         arcade.Text("THR", r_center - 15, b_y - 20, arcade.color.WHITE, 10, anchor_x="center").draw()
         arcade.draw_rect_filled(arcade.XYWH(r_center - 15, b_y + bar_h / 2, bar_w, bar_h), arcade.color.DARK_GRAY)
-        if t_r > 0: arcade.draw_rect_filled(arcade.XYWH(r_center - 15, b_y + (bar_h * t_r) / 2, bar_w, bar_h * t_r),
-                                            arcade.color.GREEN)
+        if t_r > 0:
+            arcade.draw_rect_filled(
+                arcade.XYWH(r_center - 15, b_y + (bar_h * t_r) / 2, bar_w, bar_h * t_r),
+                arcade.color.GREEN,
+            )
         # Brake
         arcade.Text("BRK", r_center + 15, b_y - 20, arcade.color.WHITE, 10, anchor_x="center").draw()
         arcade.draw_rect_filled(arcade.XYWH(r_center + 15, b_y + bar_h / 2, bar_w, bar_h), arcade.color.DARK_GRAY)
-        if b_r > 0: arcade.draw_rect_filled(arcade.XYWH(r_center + 15, b_y + (bar_h * b_r) / 2, bar_w, bar_h * b_r),
-                                            arcade.color.RED)
+        if b_r > 0:
+            arcade.draw_rect_filled(
+                arcade.XYWH(r_center + 15, b_y + (bar_h * b_r) / 2, bar_w, bar_h * b_r),
+                arcade.color.RED,
+            )
 
     def _get_driver_color(self, window, code):
         return window.driver_colors.get(code, arcade.color.GRAY)
@@ -1018,7 +1054,7 @@ class ControlsPopupComponent(BaseComponent):
         self.body_font_size = body_font_size
         self.lines = lines
         
-        self._header_text = arcade.Text("", 0, 0, arcade.color.BLACK, self.header_font_size, anchor_x="left", anchor_y="center")
+        self._header_text = arcade.Text("", 0, 0, arcade.color.WHITE, self.header_font_size, anchor_x="left", anchor_y="center")
         self._body_text = arcade.Text("", 0, 0, arcade.color.LIGHT_GRAY, self.body_font_size, anchor_x="left", anchor_y="center")
 
     def _default_lines(self) -> list[str]:
@@ -1074,16 +1110,19 @@ class ControlsPopupComponent(BaseComponent):
         cx = self.cx if self.cx is not None else window.width / 2
         cy = self.cy if self.cy is not None else window.height / 2
         rect = arcade.XYWH(cx, cy, self.width, self.height)
-        arcade.draw_rect_filled(rect, (0, 0, 0, 255))
-        arcade.draw_rect_outline(rect, arcade.color.GRAY, 2)
+        # Subtle outer glow
+        glow_rect = arcade.XYWH(cx, cy, self.width + 6, self.height + 6)
+        arcade.draw_rect_filled(glow_rect, (60, 60, 80, 40))
+        arcade.draw_rect_filled(rect, (10, 10, 20, 250))
+        arcade.draw_rect_outline(rect, (50, 50, 70), 2)
 
         header_height = max(28, int(self.header_font_size * 2))
         header_cy = cy + self.height / 2 - header_height / 2
-        arcade.draw_rect_filled(arcade.XYWH(cx, header_cy, self.width, header_height), arcade.color.GRAY)
+        arcade.draw_rect_filled(arcade.XYWH(cx, header_cy, self.width, header_height), (30, 30, 50))
         
         self._header_text.font_size = self.header_font_size
         self._header_text.bold = True
-        self._header_text.color = arcade.color.BLACK
+        self._header_text.color = arcade.color.WHITE
         self._header_text.text = "Controls"
         self._header_text.x = cx - self.width / 2 + 12
         self._header_text.y = header_cy
@@ -1173,12 +1212,14 @@ class SessionInfoComponent(BaseComponent):
         banner_width = min(900, window.width - 40)
         center_x = window.width / 2
         top_y = window.height - 10
-        bottom_y = top_y - banner_height
-        
-        # Draw semi-transparent background
+        # Draw gradient-style background
         rect = arcade.XYWH(center_x, top_y - banner_height/2, banner_width, banner_height)
-        arcade.draw_rect_filled(rect, (20, 20, 20, 220))
-        arcade.draw_rect_outline(rect, arcade.color.GRAY, 2)
+        # Dark bottom layer
+        arcade.draw_rect_filled(rect, (8, 8, 18, 230))
+        # Subtle top accent line
+        accent_rect = arcade.XYWH(center_x, top_y - 1, banner_width, 3)
+        arcade.draw_rect_filled(accent_rect, (225, 6, 0, 200))
+        arcade.draw_rect_outline(rect, (40, 40, 60, 120), 1)
         
         # Get info
         event = self.session_info.get('event_name', '')
@@ -1406,7 +1447,17 @@ class RaceProgressBarComponent(BaseComponent):
                     progress_width,
                     self.height - 4
                 )
-                arcade.draw_rect_filled(progress_rect, self.COLORS["progress_fill"])
+                # Gradient-style fill: brighter green at the leading edge
+                arcade.draw_rect_filled(progress_rect, (0, 160, 40))
+                # Bright leading edge strip
+                edge_width = max(3, progress_width * 0.02)
+                edge_rect = arcade.XYWH(
+                    self._bar_left + progress_width - edge_width / 2,
+                    bar_center_y,
+                    edge_width,
+                    self.height - 4
+                )
+                arcade.draw_rect_filled(edge_rect, (80, 255, 100))
         
         # 3. Draw lap markers (vertical lines)
         if self._total_laps > 1:
@@ -1460,8 +1511,6 @@ class RaceProgressBarComponent(BaseComponent):
         """Draw a single event marker based on type."""
         event_type = event.get("type", "")
         marker_top = self.bottom + self.height + self.marker_height
-        marker_bottom = self.bottom + self.height
-        
         if event_type == self.EVENT_DNF:
             # Draw red X marker above the bar
             size = 6
@@ -1817,7 +1866,7 @@ class RaceControlsComponent(BaseComponent):
                 )
     def _draw_speed_comp(self, x: float, y: float, speed: float):
         """Draw speed multiplier text."""
-        if 'speed+' and 'speed-' in self._control_textures:
+        if 'speed+' in self._control_textures and 'speed-' in self._control_textures:
             texture_plus = self._control_textures['speed+']
             texture_minus = self._control_textures['speed-']
             
@@ -1913,18 +1962,22 @@ class RaceControlsComponent(BaseComponent):
             return True
         elif self._point_in_rect(x, y, self.speed_increase_rect):
             if hasattr(window, 'playback_speed'):
-                # FIX: Use index lookup to increment speed.
-                if window.playback_speed < max(self.PLAYBACK_SPEEDS):
-                    current_index = self.PLAYBACK_SPEEDS.index(window.playback_speed)
-                    window.playback_speed = self.PLAYBACK_SPEEDS[min(current_index + 1, len(self.PLAYBACK_SPEEDS) - 1)]
+                # Safe lookup: find nearest speed in list, then step up
+                import bisect
+                idx = bisect.bisect_left(self.PLAYBACK_SPEEDS, window.playback_speed)
+                idx = min(idx, len(self.PLAYBACK_SPEEDS) - 1)
+                if idx < len(self.PLAYBACK_SPEEDS) - 1:
+                    window.playback_speed = self.PLAYBACK_SPEEDS[idx + 1]
                     self.flash_button('speed_increase')
             return True
         elif self._point_in_rect(x, y, self.speed_decrease_rect):
             if hasattr(window, 'playback_speed'):
-                # FIX: Use index lookup to decrement speed safely within defined PLAYBACK_SPEEDS.
-                if window.playback_speed > min(self.PLAYBACK_SPEEDS):
-                    current_index = self.PLAYBACK_SPEEDS.index(window.playback_speed)
-                    window.playback_speed = self.PLAYBACK_SPEEDS[max(0, current_index - 1)]
+                # Safe lookup: find nearest speed in list, then step down
+                import bisect
+                idx = bisect.bisect_right(self.PLAYBACK_SPEEDS, window.playback_speed) - 1
+                idx = max(0, idx)
+                if idx > 0:
+                    window.playback_speed = self.PLAYBACK_SPEEDS[idx - 1]
                     self.flash_button('speed_decrease')
             return True
         return False
@@ -2252,6 +2305,9 @@ def build_track_from_example_lap(example_lap, track_width=200):
 
 # Plot DRS Zones along the track sides to show DRS Zones on the track
 def plotDRSzones(example_lap):
+   if "DRS" not in example_lap:
+       return []
+
    x_val = example_lap["X"]
    y_val = example_lap["Y"]
    drs_zones = []

@@ -99,9 +99,12 @@ class TelemetryStreamClient(QThread):
     self.socket = None
     self.connected = False
     self.running = False
+    self._stop_requested = False
       
   def run(self):
     # Main thread loop - connects to server and receives data.
+    if self._stop_requested:
+      return
     self.running = True
     
     while self.running:
@@ -109,14 +112,16 @@ class TelemetryStreamClient(QThread):
         self._connect_to_server()
         self._receive_data()
       except Exception as e:
+        if not self.running:
+          break
         self.error_occurred.emit(f"Connection error: {str(e)}")
         if self.socket:
           self.socket.close()
         self.connected = False
         self.connection_status.emit("Disconnected")
         
-        # Wait before attempting to reconnect
-        self.sleep(2)
+        if self.running:
+          self.sleep(2)
               
   def _connect_to_server(self):
     # Establish connection to the telemetry stream server.
@@ -125,14 +130,14 @@ class TelemetryStreamClient(QThread):
         
     self.connection_status.emit("Connecting...")
     self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    self.socket.settimeout(5.0)  # 5 second timeout
+    self.socket.settimeout(1.0)
     
     try:
       self.socket.connect((self.host, self.port))
       self.connected = True
       self.connection_status.emit("Connected")
     except socket.timeout:
-      self.error_occurred.emit(f"Connection timeout - is F1 Race Replay running?")
+      self.error_occurred.emit("Connection timeout - is F1 Race Replay running?")
       raise
     except ConnectionRefusedError:
       self.error_occurred.emit(f"Connection refused - is F1 Race Replay running on {self.host}:{self.port}?")
@@ -172,7 +177,14 @@ class TelemetryStreamClient(QThread):
               
   def stop(self):
     # Stop the client thread.
+    self._stop_requested = True
     self.running = False
     self.connected = False
     if self.socket:
-      self.socket.close()
+      try:
+        self.socket.shutdown(socket.SHUT_RDWR)
+      except OSError:
+        pass
+      finally:
+        self.socket.close()
+        self.socket = None

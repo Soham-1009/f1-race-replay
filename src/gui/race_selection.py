@@ -47,10 +47,218 @@ class RaceSelectionWindow(QMainWindow):
         self.selected_year=self.current_year 
 
         self.setWindowTitle("F1 Race Replay - Session Selection")
+        self._apply_theme()
         self._setup_ui()
-        self.resize(1000, 700)
-        self.setMinimumSize(800, 600)
+        self.resize(1100, 750)
+        self.setMinimumSize(900, 650)
         self.setWindowState(self.windowState())
+
+    def _apply_theme(self):
+        """Apply a modern dark F1-branded stylesheet."""
+        self.setStyleSheet("""
+            /* ── Global ────────────────────────────────────── */
+            QMainWindow, QWidget {
+                background-color: #0f0f1a;
+                color: #e0e0e0;
+                font-family: 'Segoe UI', 'Arial', sans-serif;
+                font-size: 13px;
+            }
+
+            /* ── Labels ────────────────────────────────────── */
+            QLabel {
+                color: #c8c8d0;
+                font-size: 13px;
+            }
+            QLabel#headerLabel {
+                color: #ffffff;
+                font-size: 22px;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }
+            QLabel#sessionHeader {
+                color: #ffffff;
+                font-size: 16px;
+                font-weight: bold;
+            }
+
+            /* ── Buttons ───────────────────────────────────── */
+            QPushButton {
+                background-color: #1c1c2e;
+                color: #e0e0e0;
+                border: 1px solid #2a2a3e;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2a2a40;
+                border: 1px solid #e10600;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #e10600;
+                color: #ffffff;
+                border: 1px solid #e10600;
+            }
+            QPushButton#settingsBtn {
+                background-color: transparent;
+                border: 1px solid #e10600;
+                color: #e10600;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-weight: bold;
+            }
+            QPushButton#settingsBtn:hover {
+                background-color: #e10600;
+                color: #ffffff;
+            }
+            QPushButton#sessionBtn {
+                background-color: #1a1a2e;
+                border: 1px solid #30304a;
+                border-radius: 8px;
+                padding: 12px 20px;
+                font-size: 14px;
+                font-weight: bold;
+                color: #e0e0e0;
+            }
+            QPushButton#sessionBtn:hover {
+                background-color: #e10600;
+                border: 1px solid #e10600;
+                color: #ffffff;
+            }
+            QPushButton#sessionBtn:pressed {
+                background-color: #b50500;
+            }
+
+            /* ── ComboBoxes ────────────────────────────────── */
+            QComboBox {
+                background-color: #1c1c2e;
+                color: #e0e0e0;
+                border: 1px solid #2a2a3e;
+                border-radius: 6px;
+                padding: 6px 12px;
+                min-height: 28px;
+                font-size: 13px;
+            }
+            QComboBox:hover {
+                border: 1px solid #e10600;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border-left: 1px solid #2a2a3e;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+            }
+            QComboBox::down-arrow {
+                width: 12px;
+                height: 12px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1c1c2e;
+                color: #e0e0e0;
+                selection-background-color: #e10600;
+                selection-color: #ffffff;
+                border: 1px solid #2a2a3e;
+                border-radius: 4px;
+                padding: 4px;
+            }
+
+            /* ── Tree Widget (Schedule) ────────────────────── */
+            QTreeWidget {
+                background-color: #12121f;
+                color: #d0d0d8;
+                border: 1px solid #1e1e30;
+                border-radius: 8px;
+                padding: 4px;
+                font-size: 13px;
+                outline: 0;
+            }
+            QTreeWidget::item {
+                padding: 6px 8px;
+                border-bottom: 1px solid #1a1a2a;
+            }
+            QTreeWidget::item:hover {
+                background-color: #1e1e32;
+            }
+            QTreeWidget::item:selected {
+                background-color: #e10600;
+                color: #ffffff;
+            }
+            QTreeWidget::item:alternate {
+                background-color: #14141f;
+            }
+            QHeaderView::section {
+                background-color: #16162a;
+                color: #a0a0b0;
+                border: none;
+                border-bottom: 2px solid #e10600;
+                padding: 8px 10px;
+                font-size: 12px;
+                font-weight: bold;
+                text-transform: uppercase;
+            }
+
+            /* ── Scrollbars ────────────────────────────────── */
+            QScrollBar:vertical {
+                background: #0f0f1a;
+                width: 10px;
+                border-radius: 5px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #2a2a3e;
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #e10600;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+            QScrollBar:horizontal {
+                background: #0f0f1a;
+                height: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #2a2a3e;
+                border-radius: 5px;
+                min-width: 30px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #e10600;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0;
+            }
+
+            /* ── Progress Dialog ───────────────────────────── */
+            QProgressDialog {
+                background-color: #0f0f1a;
+                color: #e0e0e0;
+            }
+            QProgressBar {
+                background-color: #1c1c2e;
+                border: 1px solid #2a2a3e;
+                border-radius: 6px;
+                text-align: center;
+                color: #ffffff;
+            }
+            QProgressBar::chunk {
+                background-color: #e10600;
+                border-radius: 5px;
+            }
+
+            /* ── Message Box ───────────────────────────────── */
+            QMessageBox {
+                background-color: #0f0f1a;
+                color: #e0e0e0;
+            }
+        """)
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -62,12 +270,14 @@ class RaceSelectionWindow(QMainWindow):
         # Header (title)
         header_layout = QHBoxLayout()
         header_label = QLabel("F1 Race Replay 🏎️")
+        header_label.setObjectName("headerLabel")
         font = header_label.font()
         settings_btn = QPushButton("⚙ Settings")
+        settings_btn.setObjectName("settingsBtn")
         settings_btn.setCursor(Qt.PointingHandCursor)
-        settings_btn.setFixedHeight(32)
+        settings_btn.setFixedHeight(34)
         settings_btn.clicked.connect(self.open_settings)
-        font.setPointSize(18)
+        font.setPointSize(20)
         font.setBold(True)
         header_label.setFont(font)
         header_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -122,8 +332,9 @@ class RaceSelectionWindow(QMainWindow):
         self.session_panel.setLayout(self.session_panel_layout)
         self.session_panel_layout.setAlignment(Qt.AlignTop)
         header_lbl = QLabel("Sessions")
+        header_lbl.setObjectName("sessionHeader")
         hdr_font = header_lbl.font()
-        hdr_font.setPointSize(14)
+        hdr_font.setPointSize(15)
         hdr_font.setBold(True)
         header_lbl.setFont(hdr_font)
         self.session_panel_layout.addWidget(header_lbl)
@@ -280,6 +491,8 @@ class RaceSelectionWindow(QMainWindow):
             for s in sessions:
                 if s in available_sessions:
                     btn = QPushButton(s)
+                    btn.setObjectName("sessionBtn")
+                    btn.setCursor(Qt.PointingHandCursor)
                     btn.clicked.connect(
                         lambda _, sname=s, e=ev: self._on_session_button_clicked(e, sname)
                     )
