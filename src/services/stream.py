@@ -309,16 +309,22 @@ class TelemetryStreamClientV2(QThread):
             # migration). We pull out the envelope and the raw
             # payload, emit them, and let consumers subscribe
             # to whichever they need.
-            if isinstance(envelope, dict) and "envelope" in envelope:
-              env = envelope["envelope"]
-              raw = envelope.get("raw", {})
-              self.envelope_received.emit(env)
-              self.data_received.emit(raw)
-            else:
-              # Producer has not yet migrated; fall back to
-              # legacy shape.
-              self.envelope_received.emit({})
-              self.data_received.emit(envelope)
+            if isinstance(envelope, dict):
+              if "payload" in envelope and "type" in envelope and "version" in envelope:
+                # Direct protocol envelope (src.streaming.transport wire format)
+                self.envelope_received.emit(envelope)
+                payload = envelope.get("payload", {})
+                self.data_received.emit(payload if isinstance(payload, dict) else {"payload": payload})
+              elif "envelope" in envelope:
+                # Transitional {"envelope": ..., "raw": ...}
+                env = envelope.get("envelope", {})
+                raw = envelope.get("raw", {})
+                self.envelope_received.emit(env if isinstance(env, dict) else {})
+                self.data_received.emit(raw if isinstance(raw, dict) else {})
+              else:
+                # Bare legacy payload
+                self.envelope_received.emit({})
+                self.data_received.emit(envelope)
       except socket.timeout:
         continue
       except Exception as e:

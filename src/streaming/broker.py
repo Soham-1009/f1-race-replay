@@ -78,15 +78,18 @@ class Subscriber:
         self._lock = threading.Lock()
         self._closed = False
 
-    def enqueue(self, envelope: Dict[str, Any]) -> None:
+    def enqueue(self, envelope: Dict[str, Any]) -> int:
         with self._lock:
             if self._closed:
-                return
+                return 0
+            dropped = 0
             if len(self.queue) >= self.capacity:
                 # Drop the oldest; keep the newest.
                 self.queue.popleft()
                 self.dropped += 1
+                dropped = 1
             self.queue.append(envelope)
+            return dropped
 
     def pop(self) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -153,6 +156,17 @@ class StreamingBroker:
         with self._subscribers_lock:
             return len(self._subscribers)
 
+    def note_drop(self, subscriber_id: str, n: int = 1) -> None:
+        """Record network/transport drops for a subscriber in a thread-safe manner."""
+        if n <= 0:
+            return
+        with self._subscribers_lock:
+            sub = self._subscribers.get(subscriber_id)
+            if sub is not None:
+                with sub._lock:
+                    sub.dropped += n
+                self.dropped_total += n
+
     # -- static payload management ----------------------------------
     def set_static_payload(self, message_type: MessageType, payload: Any) -> None:
         """Register (or replace) a static payload.
@@ -188,10 +202,11 @@ class StreamingBroker:
         env = self._build_envelope(message_type, payload)
         with self._subscribers_lock:
             subs = list(self._subscribers.values())
+        drops = 0
         for sub in subs:
-            sub.enqueue(env)
+            drops += sub.enqueue(env)
         self.published_total += 1
-        self.dropped_total += sum(s.dropped for s in subs)
+        self.dropped_total += drops
         return env
 
     # -- dispatcher -------------------------------------------------
@@ -215,7 +230,7 @@ class StreamingBroker:
             except Exception as exc:
                 logger.warning("deliver to %r raised: %s",
                                 sub.subscriber_id, exc)
-                sub.close()
+                self.remove_subscriber(sub.subscriber_id)
         return delivered
 
     # -- introspection ----------------------------------------------

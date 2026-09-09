@@ -1032,3 +1032,254 @@ def test_module_importable(module_name):
         if any(k in msg for k in ("PyQt", "PySide", "matplotlib")):
             pytest.skip(f"optional binding: {exc}")
         raise
+
+
+# ==========================================================================
+#  SECTION 16 — TASK 28 COPILOT REVIEW REGRESSION TESTS
+# ==========================================================================
+import re
+import types
+from src.services.stream import TelemetryStreamClientV2
+from src.cli.args import parse_args
+from src.tools.dependency_audit import parse_requirements, PinKind
+
+
+def test_v2_client_decodes_direct_protocol_envelope():
+    """Verify TelemetryStreamClientV2 unbundles direct protocol envelopes."""
+    client = TelemetryStreamClientV2()
+    client.connected = True
+    client.running = True
+
+    envelopes_seen = []
+    payloads_seen = []
+    client.envelope_received = types.SimpleNamespace(emit=envelopes_seen.append)
+    client.data_received = types.SimpleNamespace(emit=payloads_seen.append)
+
+    direct_env = {
+        "type": "FRAME_UPDATE",
+        "version": 1,
+        "session_id": "sess_123",
+        "seq": 42,
+        "ts": 12345.678,
+        "payload": {"driver": "VER", "speed": 315.4},
+    }
+
+    raw_chunk = json.dumps(direct_env) + "\n"
+
+    class _MockSocket:
+        def __init__(self, data_str):
+            self._bytes = data_str.encode("utf-8")
+            self._pos = 0
+        def recv(self, bufsize):
+            if self._pos >= len(self._bytes):
+                return b""
+            chunk = self._bytes[self._pos:self._pos + bufsize]
+            self._pos += len(chunk)
+            return chunk
+        def close(self): pass
+
+    client.socket = _MockSocket(raw_chunk)
+    client._receive_data()
+
+    assert len(envelopes_seen) == 1
+    assert envelopes_seen[0] == direct_env
+    assert len(payloads_seen) == 1
+    assert payloads_seen[0] == {"driver": "VER", "speed": 315.4}
+
+
+def test_v2_client_decodes_transitional_and_bare():
+    """Verify TelemetryStreamClientV2 handles transitional and bare shapes."""
+    client = TelemetryStreamClientV2()
+    client.connected = True
+    client.running = True
+
+    envelopes_seen = []
+    payloads_seen = []
+    client.envelope_received = types.SimpleNamespace(emit=envelopes_seen.append)
+    client.data_received = types.SimpleNamespace(emit=payloads_seen.append)
+
+    transitional = {"envelope": {"type": "FRAME_UPDATE"}, "raw": {"driver": "NOR"}}
+    bare = {"driver": "HAM", "speed": 290.0}
+
+    chunk = json.dumps(transitional) + "\n" + json.dumps(bare) + "\n"
+
+    class _MockSocket:
+        def __init__(self, data_str):
+            self._bytes = data_str.encode("utf-8")
+            self._pos = 0
+        def recv(self, bufsize):
+            if self._pos >= len(self._bytes):
+                return b""
+            chunk = self._bytes[self._pos:self._pos + bufsize]
+            self._pos += len(chunk)
+            return chunk
+        def close(self): pass
+
+    client.socket = _MockSocket(chunk)
+    client._receive_data()
+
+    assert len(envelopes_seen) == 2
+    assert envelopes_seen[0] == {"type": "FRAME_UPDATE"}
+    assert payloads_seen[0] == {"driver": "NOR"}
+    assert envelopes_seen[1] == {}
+    assert payloads_seen[1] == bare
+
+
+def test_broker_drop_accounting_no_drops():
+    broker = StreamingBroker(session_id="s1", queue_capacity=10)
+    broker.add_subscriber("sub1", deliver=lambda e: None)
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 1})
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 2})
+    assert broker.dropped_total == 0
+    assert broker._subscribers["sub1"].dropped == 0
+
+
+def test_broker_drop_accounting_single_drop():
+    broker = StreamingBroker(session_id="s1", queue_capacity=2)
+    broker.add_subscriber("sub1", deliver=lambda e: None)
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 1})
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 2})
+    assert broker.dropped_total == 0
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 3})
+    assert broker.dropped_total == 1
+    assert broker._subscribers["sub1"].dropped == 1
+
+
+def test_broker_drop_accounting_repeated_publishes_no_extra_drops():
+    broker = StreamingBroker(session_id="s1", queue_capacity=2)
+    broker.add_subscriber("sub1", deliver=lambda e: None)
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 1})
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 2})
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 3})
+    assert broker.dropped_total == 1
+
+    # Drain one frame so queue has room again
+    broker.dispatch_once()
+
+    # Next publish fits in queue, so no new drops should be added
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 4})
+    assert broker.dropped_total == 1
+    assert broker._subscribers["sub1"].dropped == 1
+
+
+def test_broker_drop_accounting_multiple_subscribers():
+    broker = StreamingBroker(session_id="s1", queue_capacity=10)
+    sub1 = broker.add_subscriber("sub1", deliver=lambda e: None)
+    sub1.capacity = 2
+    sub2 = broker.add_subscriber("sub2", deliver=lambda e: None)
+    sub2.capacity = 4
+
+    for i in range(5):
+        broker.publish(MessageType.FRAME_UPDATE, {"f": i})
+
+    assert sub1.dropped == 3
+    assert sub2.dropped == 1
+    assert broker.dropped_total == 4
+
+
+def test_broker_failed_deliver_subscriber_cleanup():
+    broker = StreamingBroker(session_id="s1")
+    def _bad_deliver(env):
+        raise ConnectionResetError("client died")
+
+    sub = broker.add_subscriber("bad_client", deliver=_bad_deliver)
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 1})
+
+    assert broker.subscriber_count() == 1
+    delivered = broker.dispatch_once()
+
+    assert delivered == 0
+    assert sub._closed is True
+    assert broker.subscriber_count() == 0
+    assert "bad_client" not in broker._subscribers
+    assert broker.stats()["subscribers"] == []
+
+    # Future dispatches must not see bad_client
+    broker.publish(MessageType.FRAME_UPDATE, {"f": 2})
+    delivered2 = broker.dispatch_once()
+    assert delivered2 == 0
+
+
+def test_broker_note_drop_thread_safe():
+    broker = StreamingBroker(session_id="s1")
+    sub = broker.add_subscriber("client1", deliver=lambda e: None)
+
+    broker.note_drop("client1", 2)
+    assert sub.dropped == 2
+    assert broker.dropped_total == 2
+
+    threads = []
+    def _worker():
+        for _ in range(50):
+            broker.note_drop("client1", 1)
+    for _ in range(10):
+        t = threading.Thread(target=_worker)
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sub.dropped == 2 + 500
+    assert broker.dropped_total == 2 + 500
+
+    broker.note_drop("missing_client", 5)
+    assert broker.dropped_total == 502
+
+
+def test_main_verbose_flag_parsing():
+    args_default = parse_args([])
+    assert args_default.verbose is False
+
+    args_verbose = parse_args(["--verbose"])
+    assert args_verbose.verbose is True
+
+
+def test_dependency_audit_extras_and_formats():
+    text = """
+    # Requirements with extras, pins, and comments
+    requests[socks]==2.32.0
+    fastf1>=3.4.0 # inline comment
+    arcade~=2.6.17
+    urllib3[brotli]
+       bare-package   
+    """
+    entries = parse_requirements(text)
+    assert len(entries) == 5
+
+    assert entries[0].name == "requests"
+    assert entries[0].op == "=="
+    assert entries[0].version == "2.32.0"
+    assert entries[0].kind == PinKind.EXACT
+
+    assert entries[1].name == "fastf1"
+    assert entries[1].op == ">="
+    assert entries[1].version == "3.4.0"
+    assert entries[1].kind == PinKind.MIN
+
+    assert entries[2].name == "arcade"
+    assert entries[2].op == "~="
+    assert entries[2].version == "2.6.17"
+    assert entries[2].kind == PinKind.COMPAT
+
+    assert entries[3].name == "urllib3"
+    assert entries[3].kind == PinKind.BARE
+
+    assert entries[4].name == "bare-package"
+    assert entries[4].kind == PinKind.BARE
+
+
+def test_insights_menu_no_malformed_hex_colors():
+    menu_file = Path("src/gui/insights_menu.py")
+    assert menu_file.exists()
+    content = menu_file.read_text(encoding="utf-8")
+    assert "#6868880" not in content
+
+    malformed = re.findall(r"#[0-9a-fA-F]{5}\b|#[0-9a-fA-F]{7}\b|#[0-9a-fA-F]{9,}\b", content)
+    assert malformed == [], f"Found malformed hex colors in insights_menu.py: {malformed}"
+
+
+def test_conftest_comment_accurately_documents_qapplication():
+    conftest_file = Path("tests/conftest.py")
+    assert conftest_file.exists()
+    text = conftest_file.read_text(encoding="utf-8")
+    assert "Intentionally NO QApplication" not in text

@@ -126,13 +126,14 @@ def main(year=None, round_number=None, playback_speed=1, session_type='R', visib
 
 if __name__ == "__main__":
 
-  if "--verbose" not in sys.argv:# fastf1 logging is disabled by default
-    logging.getLogger("fastf1").setLevel(logging.CRITICAL)
-
   # PHASE J: delegate argv parsing to the argparse-based
   # ``parse_args``. The dispatch below preserves the legacy
   # behaviour exactly.
   args = parse_args()
+
+  if not args.verbose:
+    # fastf1 logging is disabled by default
+    logging.getLogger("fastf1").setLevel(logging.CRITICAL)
 
   # Early-exit branches: --diagnostics, --cli, --list-rounds,
   # --list-sprints.

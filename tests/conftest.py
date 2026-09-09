@@ -251,10 +251,11 @@ def _make_pyside6():
         def sleep(self, *a, **kw): pass
     qc.QThread = _QThread
     p6.QtCore = qc
-    # Intentionally NO QApplication so matplotlib's backend
-    # selection does not falsely believe a Qt binding is
-    # available. This preserves the original
-    # tests/test_imports.py skip behaviour.
+    # Provides minimal stub widgets (including QApplication and
+    # QMainWindow) for import-time resolution. Missing UI classes
+    # (such as QComboBox and QSizePolicy) and real QtGui bindings
+    # remain uninstalled so tests exercising real GUI behavior
+    # skip cleanly via pytest.importorskip.
     qw = types.ModuleType("PySide6.QtWidgets")
     class _QMainWindow:
         def __init__(self, *a, **kw): pass
@@ -305,7 +306,7 @@ def _install_optional_deps():
             lambda: sys.modules["fastf1"].plotting)
     # PySide6 is special: it has 3 submodules. Always install
     # the fake trio so the existing tests see the controlled
-    # surface (no QApplication, no QComboBox, etc.).
+    # surface (minimal stubs; no QComboBox, QSizePolicy, etc.).
     p6, qc, qw = _make_pyside6()
     sys.modules["PySide6"] = p6
     sys.modules["PySide6.QtCore"] = qc

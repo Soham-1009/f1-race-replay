@@ -263,7 +263,7 @@ class TelemetryStreamServer:
                 # Kernel send buffer full; drop this frame but keep
                 # the client. The broker's per-subscriber ``dropped``
                 # counter is updated for the *envelope* we just lost.
-                self.broker._subscribers[client_id].dropped += 1
+                self.broker.note_drop(client_id, 1)
                 return
             except OSError as exc:
                 # Connection-level error: drop the client.
@@ -283,7 +283,7 @@ class TelemetryStreamServer:
                 # the client alive. (Newline-delimited framing means
                 # the client may discard this frame; the next frame
                 # will be fine.)
-                self.broker._subscribers[client_id].dropped += 1
+                self.broker.note_drop(client_id, 1)
         return _deliver
 
 

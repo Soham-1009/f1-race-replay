@@ -19,15 +19,19 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 
-# Lines that look like ``package==1.2.3`` or ``package>=1.2``.
+# Lines that look like ``package==1.2.3``, ``package[extra]==1.2.3``, or ``package>=1.2``.
 _PIN_RE = re.compile(
     r"^\s*(?P<name>[A-Za-z0-9_.\-]+)"
-    r"(?P<op>==|>=|<=|~=|!=|>|<)"
-    r"(?P<version>[A-Za-z0-9_.\-\+]+)"
-    r"\s*(?P<extras>\[.*?\])?\s*$"
+    r"(?:\s*\[(?P<extras>[^\]]*)\])?"
+    r"\s*(?P<op>==|>=|<=|~=|!=|>|<)"
+    r"\s*(?P<version>[A-Za-z0-9_.\-\+]+)"
+    r"(?:\s*\[(?P<trailing_extras>[^\]]*)\])?\s*$"
 )
-# Bare name (no version constraint).
-_BARE_RE = re.compile(r"^\s*(?P<name>[A-Za-z0-9_.\-]+)\s*$")
+# Bare name (no version constraint, optional extras).
+_BARE_RE = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9_.\-]+)"
+    r"(?:\s*\[(?P<extras>[^\]]*)\])?\s*$"
+)
 
 
 # Packages that are known to have version-coupling constraints in

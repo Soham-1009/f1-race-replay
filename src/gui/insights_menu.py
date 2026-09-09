@@ -203,7 +203,7 @@ class InsightsMenu(QMainWindow):
         
         info_label = QLabel("Requires telemetry stream enabled")
         info_label.setFont(QFont("Segoe UI", 10))
-        info_label.setStyleSheet("color: #6868880;")
+        info_label.setStyleSheet("color: #686880;")
         layout.addWidget(info_label)
         
         layout.addStretch()
