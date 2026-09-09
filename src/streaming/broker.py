@@ -202,11 +202,11 @@ class StreamingBroker:
         env = self._build_envelope(message_type, payload)
         with self._subscribers_lock:
             subs = list(self._subscribers.values())
-        drops = 0
-        for sub in subs:
-            drops += sub.enqueue(env)
-        self.published_total += 1
-        self.dropped_total += drops
+            drops = 0
+            for sub in subs:
+                drops += sub.enqueue(env)
+            self.published_total += 1
+            self.dropped_total += drops
         return env
 
     # -- dispatcher -------------------------------------------------
@@ -237,12 +237,9 @@ class StreamingBroker:
     def stats(self) -> Dict[str, Any]:
         with self._subscribers_lock:
             subs = list(self._subscribers.values())
-        return {
-            "session_id": self.session_id,
-            "subscriber_count": len(subs),
-            "published_total": self.published_total,
-            "dropped_total": self.dropped_total,
-            "subscribers": [
+            pub_total = self.published_total
+            drop_total = self.dropped_total
+            subscribers = [
                 {
                     "id": s.subscriber_id,
                     "queued": len(s.queue),
@@ -250,7 +247,13 @@ class StreamingBroker:
                     "dropped": s.dropped,
                 }
                 for s in subs
-            ],
+            ]
+        return {
+            "session_id": self.session_id,
+            "subscriber_count": len(subs),
+            "published_total": pub_total,
+            "dropped_total": drop_total,
+            "subscribers": subscribers,
         }
 
 

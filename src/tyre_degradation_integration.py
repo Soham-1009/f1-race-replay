@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from src.bayesian_tyre_model import BayesianTyreDegradationModel
 # TASK 2: explicit availability contract. The Bayesian model
 # has a placeholder path that returns ``{'actual_delta': 0.0,
@@ -133,6 +133,15 @@ class TyreDegradationIntegrator:
         self._cache.clear()
 
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 def _wrap_with_availability(health: Optional[Dict]) -> Optional[Dict]:
     """TASK 2: at the integrator boundary, replace the legacy
     placeholder ``(actual_delta=0.0, overdriving=False)`` with
@@ -141,27 +150,55 @@ def _wrap_with_availability(health: Optional[Dict]) -> Optional[Dict]:
     """
     if not health:
         return health
-    actual_delta = health.get("actual_delta", 0.0)
+    raw_delta = health.get("actual_delta")
     overdriving = health.get("overdriving", False)
-    if is_placeholder(actual_delta, overdriving):
+    if raw_delta is None or is_placeholder(raw_delta, overdriving):
         result = not_available("Bayesian tyre model returned a "
                                  "placeholder (no fit available)")
     else:
-        result = available_result(
-            baseline_pace=float(health.get("baseline_pace", 0.0))
-                         or 0.0,
-            expected_pace=float(health.get("expected_pace", 0.0))
-                         or float(health.get("expected_delta", 0.0)) * -1
-                         or 0.0,
-            actual_delta=float(actual_delta),
-            credible_low=float(health.get("credible_low",
-                                            actual_delta)),
-            credible_high=float(health.get("credible_high",
-                                             actual_delta)),
-            overdriving=bool(overdriving),
-            tyre_age_laps=int(health.get("laps_on_tyre", 0) or 0),
-            compound=str(health.get("compound", "?")),
-        )
+        try:
+            actual_delta = float(raw_delta)
+        except (ValueError, TypeError):
+            result = not_available("Bayesian tyre model returned invalid delta")
+        else:
+            raw_baseline = health.get("baseline_pace")
+            baseline_pace = _safe_float(raw_baseline, 0.0)
+
+            raw_expected = health.get("expected_pace")
+            if raw_expected is not None:
+                expected_pace = _safe_float(raw_expected, 0.0)
+            else:
+                raw_exp_delta = health.get("expected_delta")
+                if raw_exp_delta is not None:
+                    expected_pace = _safe_float(raw_exp_delta, 0.0) * -1.0
+                else:
+                    expected_pace = 0.0
+
+            raw_low = health.get("credible_low")
+            credible_low = _safe_float(raw_low, actual_delta)
+
+            raw_high = health.get("credible_high")
+            credible_high = _safe_float(raw_high, actual_delta)
+
+            raw_laps = health.get("laps_on_tyre")
+            try:
+                tyre_age_laps = int(raw_laps) if raw_laps is not None else 0
+            except (ValueError, TypeError):
+                tyre_age_laps = 0
+
+            raw_compound = health.get("compound")
+            compound = str(raw_compound) if raw_compound is not None else "?"
+
+            result = available_result(
+                baseline_pace=baseline_pace,
+                expected_pace=expected_pace,
+                actual_delta=actual_delta,
+                credible_low=credible_low,
+                credible_high=credible_high,
+                overdriving=bool(overdriving),
+                tyre_age_laps=tyre_age_laps,
+                compound=compound,
+            )
     # Merge strategy:
     # 1. Start from the legacy health dict (it carries
     #    compound / laps_on_tyre / health / expected_delta, which

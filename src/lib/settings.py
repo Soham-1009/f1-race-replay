@@ -19,17 +19,21 @@ from src.lib.resource_paths import (
 )
 
 
-_DEFAULT_CACHE = str(cache_dir())
-_DEFAULT_COMPUTED = str(computed_data_dir())
+def _default_cache() -> str:
+    return str(cache_dir())
+
+
+def _default_computed() -> str:
+    return str(computed_data_dir())
 
 
 class SettingsManager:
     """Manages application settings with JSON file persistence."""
 
-    # Default settings values (PHASE G: project-root-relative).
+    # Default settings values (resolved lazily to avoid import-time filesystem side effects).
     DEFAULTS = {
-        "cache_location": _DEFAULT_CACHE,
-        "computed_data_location": _DEFAULT_COMPUTED,
+        "cache_location": ".fastf1-cache",
+        "computed_data_location": "computed_data",
     }
 
     _instance: Optional["SettingsManager"] = None
@@ -97,9 +101,14 @@ class SettingsManager:
         Returns:
             The setting value or default.
         """
-        return self._settings.get(
-            key, default if default is not None else self.DEFAULTS.get(key)
-        )
+        val = self._settings.get(key)
+        if val is None:
+            val = default if default is not None else self.DEFAULTS.get(key)
+        if key == "cache_location" and (val is None or val == ".fastf1-cache"):
+            return _default_cache()
+        if key == "computed_data_location" and (val is None or val == "computed_data"):
+            return _default_computed()
+        return val
 
     def set(self, key: str, value: Any) -> None:
         """Set a setting value.
@@ -125,12 +134,7 @@ class SettingsManager:
         guarantee a project-root-relative path. Customized
         values are returned as-is.
         """
-        v = self.get("cache_location")
-        if v == ".fastf1-cache":
-            # Legacy CWD-relative value: redirect to the
-            # project-root-relative path.
-            return str(cache_dir())
-        return v
+        return self.get("cache_location")
 
     @cache_location.setter
     def cache_location(self, value: str) -> None:
@@ -147,10 +151,7 @@ class SettingsManager:
         to guarantee a project-root-relative path. Customized
         values are returned as-is.
         """
-        v = self.get("computed_data_location")
-        if v == "computed_data":
-            return str(computed_data_dir())
-        return v
+        return self.get("computed_data_location")
 
     @computed_data_location.setter
     def computed_data_location(self, value: str) -> None:
@@ -162,3 +163,12 @@ class SettingsManager:
 def get_settings() -> SettingsManager:
     """Get the global settings manager instance."""
     return SettingsManager()
+
+
+def __getattr__(name: str) -> Any:
+    """Module-level lazy attribute access for backwards-compatibility without import side-effects."""
+    if name == "_DEFAULT_CACHE":
+        return _default_cache()
+    if name == "_DEFAULT_COMPUTED":
+        return _default_computed()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

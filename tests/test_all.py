@@ -1283,3 +1283,125 @@ def test_conftest_comment_accurately_documents_qapplication():
     assert conftest_file.exists()
     text = conftest_file.read_text(encoding="utf-8")
     assert "Intentionally NO QApplication" not in text
+
+
+# ==========================================================================
+#  SECTION 19 — PR COPILOT REVIEW REMEDIATIONS
+# ==========================================================================
+from unittest.mock import MagicMock
+from src.streaming.broker import StreamingBroker
+from src.streaming.protocol import MessageType
+from src.streaming.transport import TelemetryStreamServer
+from src.tyre_degradation_integration import _wrap_with_availability
+
+
+def test_transport_partial_socket_write_handling():
+    broker = StreamingBroker(session_id="test-transport-framing")
+    server = TelemetryStreamServer(broker, port=0)
+
+    # 1. Zero-byte write preserves client connection
+    mock1 = MagicMock()
+    mock1.send.return_value = 0
+    server._clients.append(mock1)
+    deliver1 = server._make_deliver(mock1, "client-1")
+    broker.add_subscriber("client-1", deliver=deliver1)
+
+    env = broker._build_envelope(MessageType.FRAME_UPDATE, {"x": 1})
+    deliver1(env)
+
+    assert mock1 in server._clients, "Zero byte write should not remove client"
+    assert not mock1.close.called, "Zero byte write should not close socket"
+    assert broker.stats()["dropped_total"] == 1, "Zero byte write should note drop"
+
+    # 2. Partial write (framing corruption prevention)
+    mock2 = MagicMock()
+    mock2.send.return_value = 5  # partial write
+    server._clients.append(mock2)
+    deliver2 = server._make_deliver(mock2, "client-2")
+    broker.add_subscriber("client-2", deliver=deliver2)
+
+    deliver2(env)
+
+    assert mock2 not in server._clients, "Partial write must remove client"
+    assert mock2.close.called, "Partial write must close socket"
+    assert "client-2" not in broker._subscribers, "Partial write must remove subscriber from broker"
+    assert broker.stats()["dropped_total"] == 2, "Partial write must note drop"
+
+
+def test_settings_import_no_side_effects(tmp_path):
+    import subprocess
+    import sys
+
+    code = (
+        "import os, sys\n"
+        "root = sys.argv[1]\n"
+        "sys.path.insert(0, root)\n"
+        "cwd_before = set(os.listdir('.'))\n"
+        "import src.lib.settings as s\n"
+        "cwd_after = set(os.listdir('.'))\n"
+        "assert cwd_before == cwd_after, f'Created: {cwd_after - cwd_before}'\n"
+        "assert not os.path.exists('.fastf1-cache')\n"
+        "assert not os.path.exists('computed_data')\n"
+        "assert s._DEFAULT_CACHE is not None\n"
+        "assert s._DEFAULT_COMPUTED is not None\n"
+    )
+    res = subprocess.run(
+        [sys.executable, "-c", code, os.path.abspath(".")],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"Error: {res.stderr}"
+
+
+def test_broker_stats_concurrency():
+    broker = StreamingBroker(session_id="test-concurrency", queue_capacity=2)
+    broker.add_subscriber("sub-1", deliver=lambda m: None)
+
+    def publisher():
+        for i in range(100):
+            broker.publish(MessageType.FRAME_UPDATE, {"i": i})
+
+    def dropper():
+        for _ in range(100):
+            broker.note_drop("sub-1", 1)
+
+    threads = [
+        threading.Thread(target=publisher),
+        threading.Thread(target=dropper),
+        threading.Thread(target=publisher),
+        threading.Thread(target=dropper),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    stats = broker.stats()
+    assert stats["published_total"] == 200
+    assert stats["dropped_total"] >= 200
+
+
+def test_wrap_with_availability_robustness():
+    # 1. actual_delta is None -> cleanly marked unavailable without raising TypeError
+    res1 = _wrap_with_availability({"actual_delta": None, "overdriving": False})
+    assert res1["available"] is False
+    assert res1["actual_delta"] is None
+
+    # 2. credible_low/high is None -> falls back to actual_delta without raising TypeError
+    res2 = _wrap_with_availability({"actual_delta": 0.5, "credible_low": None, "credible_high": None})
+    assert res2["available"] is True
+    assert res2["actual_delta"] == 0.5
+    assert res2["credible_low"] == 0.5
+    assert res2["credible_high"] == 0.5
+
+    # 3. 0.0 values not short-circuited by or logic
+    res3 = _wrap_with_availability({"actual_delta": 0.5, "expected_pace": 0.0, "expected_delta": 2.5})
+    assert res3["available"] is True
+    assert res3["expected_pace"] == 0.0
+
+    # 4. is_placeholder and wrap_legacy handle None safely
+    assert is_placeholder(None, False) is True
+    assert is_placeholder(None, True) is True
+    legacy = wrap_legacy(None, False)
+    assert legacy.available is False

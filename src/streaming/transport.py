@@ -277,13 +277,27 @@ class TelemetryStreamServer:
                 except OSError:
                     pass
                 return
-            if sent != len(line):
-                # Partial write: the kernel send buffer was not large
-                # enough to take the whole line. Drop the tail; keep
-                # the client alive. (Newline-delimited framing means
-                # the client may discard this frame; the next frame
-                # will be fine.)
+            if sent < len(line):
+                # If 0 bytes were written, framing is intact: record a drop.
+                if sent == 0:
+                    self.broker.note_drop(client_id, 1)
+                    return
+                # Partial write: kernel buffer accepted only a prefix of the line
+                # without the trailing newline delimiter. This permanently corrupts
+                # the stream framing for this TCP client. Drop the connection so the
+                # client can reconnect and resynchronize cleanly.
+                logger.warning("client %s partial write (%d/%d bytes); closing socket to avoid framing corruption",
+                               client_id, sent, len(line))
                 self.broker.note_drop(client_id, 1)
+                self.broker.remove_subscriber(client_id)
+                with self._clients_lock:
+                    if client in self._clients:
+                        self._clients.remove(client)
+                try:
+                    client.close()
+                except OSError:
+                    pass
+                return
         return _deliver
 
 

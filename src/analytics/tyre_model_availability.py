@@ -136,12 +136,14 @@ PLACEHOLDER_OVERDRIVING = False
 
 
 def is_placeholder(actual_delta: Any, overdriving: Any) -> bool:
-    """Return True iff the values look like the legacy placeholder."""
+    """Return True iff the values look like the legacy placeholder or missing fit."""
+    if actual_delta is None:
+        return True
     try:
         delta_is_zero = (float(actual_delta) == 0.0)
     except (TypeError, ValueError):
-        delta_is_zero = False
-    overdriving_is_false = (overdriving is False)
+        return True
+    overdriving_is_false = (overdriving is False or overdriving is None)
     return delta_is_zero and overdriving_is_false
 
 
@@ -156,8 +158,12 @@ def wrap_legacy(actual_delta: Any, overdriving: Any,
     """
     if is_placeholder(actual_delta, overdriving):
         return not_available(reason)
+    try:
+        delta_val = float(actual_delta)
+    except (TypeError, ValueError):
+        return not_available(reason)
     return available_result(
-        actual_delta=float(actual_delta),
+        actual_delta=delta_val,
         overdriving=bool(overdriving),
         *args, **kwargs,
     )
